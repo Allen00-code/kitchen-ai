@@ -5,8 +5,12 @@ FROM python:3.13-slim
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
+# --- CORRECCIÓN CLAVE ---
+# Le decimos a Python que la carpeta principal (/app) es parte de la ruta.
+# Esto soluciona el error "No module named 'src'"
+ENV PYTHONPATH=/app
+
 # Instalamos dependencias del sistema
-# AGREGADO: libzbar0 es vital porque tu requirements.txt tiene pyzbar
 RUN apt-get update && apt-get install -y \
     libmpv-dev \
     mpv \
