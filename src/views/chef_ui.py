@@ -1,46 +1,25 @@
 import flet as ft
+import json
+import re
 from src.services.supabase_service import supabase_client
 from src.services.gemini_service import gemini_service
-import datetime
 
 class ChefView(ft.Column):
-    def __init__(self):
+    def __init__(self, page_nav_callback=None): 
         super().__init__()
+        self.page_nav_callback = page_nav_callback
         self.expand = True
         self.scroll = ft.ScrollMode.AUTO
-        self.is_dark_mode = True
         self.manual_menu_visible = False
 
-        # --- UI DE ESTADO Y RESULTADOS ---
-        
-        # 1. Indicador de carga
+        # --- UI DE ESTADO ---
         self.loading_bar = ft.ProgressBar(width=400, color="orange", visible=False)
         self.status_text = ft.Text("", color="grey", italic=True)
 
-        # 2. Área de Receta (CORREGIDO: FONDO BLANCO)
-        self.recipe_card = ft.Container(
-            visible=False,
-            padding=20,
-            border_radius=15,
-            bgcolor="white", # <--- CAMBIO CLAVE: Fondo blanco para leer bien
-            border=ft.border.all(1, "#E0E0E0"), # Borde gris suave
-            shadow=ft.BoxShadow(spread_radius=1, blur_radius=5, color="#DDDDDD"), # Sombra suave
-            content=ft.Markdown(
-                value="", 
-                extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
-                selectable=True,
-                on_tap_link=lambda e: self.page.launch_url(e.data)
-            )
-        )
+        # --- CONTENEDOR DE TARJETAS ---
+        self.recipes_column = ft.Column(spacing=20) 
 
-        self.copy_btn = ft.IconButton(
-            icon="content_copy", 
-            tooltip="Copiar Receta", 
-            visible=False,
-            on_click=self.copy_to_clipboard
-        )
-
-        # --- CONFIGURACIÓN (Inputs) ---
+        # --- INPUTS DE CONFIGURACIÓN ---
         self.meal_type_selector = ft.Dropdown(
             label="Tipo de Comida",
             options=[
@@ -61,56 +40,44 @@ class ChefView(ft.Column):
         )
 
         self.vibe_selector = ft.Dropdown(
-            label="¿Qué se te antoja? (Estilo)",
+            label="¿Qué se te antoja?",
             options=[
                 ft.dropdown.Option("Sin preferencia"),
-                ft.dropdown.Option("Algo Salado 🥨"),
-                ft.dropdown.Option("Algo Dulce 🍬"),
-                ft.dropdown.Option("Algo Picoso 🌶️"),
-                ft.dropdown.Option("Algo Fresco/Frío ❄️"),
-                ft.dropdown.Option("Bebidas 🍹"),
-                ft.dropdown.Option("Ensaladas 🥗"),
-                ft.dropdown.Option("Postre 🍰"),
-                ft.dropdown.Option("Panadería 🥖"),
-                ft.dropdown.Option("Rápido y Fácil ⚡"),
-                ft.dropdown.Option("Gourmet 🎩"),
-                ft.dropdown.Option("Vegetariano 🥦"),
-                ft.dropdown.Option("Vegano 🌱"),
-                ft.dropdown.Option("Experimento Raro 🧪")
+                ft.dropdown.Option("Algo Salado 🥨"), ft.dropdown.Option("Algo Dulce 🍬"),
+                ft.dropdown.Option("Algo Picoso 🌶️"), ft.dropdown.Option("Algo Fresco ❄️"),
+                ft.dropdown.Option("Rápido y Fácil ⚡"), ft.dropdown.Option("Gourmet 🎩"),
+                ft.dropdown.Option("Comfort Food 🍲")
             ],
             value="Sin preferencia", expand=True
         )
         
         self.additional_instructions = ft.TextField(
-            label="Instrucciones Adicionales (Opcional)",
-            hint_text="Ej: 'Sin cebolla', 'Usa AirFryer', 'Para 3 personas'...",
+            label="Instrucciones Adicionales",
+            hint_text="Ej: 'Muy detallado', 'Explicame como niño', 'Sin cebolla'...",
             text_size=13, multiline=False, expand=True
         )
         
-        self.fit_mode_switch = ft.Switch(label="🥗 Modo Fit (Ingredientes Saludables)", value=False)
-        
-        self.exclusion_mode_switch = ft.Switch(
-            label="🚫 Modo Exclusión (Usar todo MENOS lo marcado)", 
-            value=False, active_color="red"
-        )
+        self.fit_mode_switch = ft.Switch(label="🥗 Modo Fit", value=False)
+        self.exclusion_mode_switch = ft.Switch(label="🚫 Modo Exclusión", value=False, active_color="red")
 
         self.workspace = ft.Column()
 
-        # Botones
-        self.btn_auto = ft.ElevatedButton("🎲 Sugerencia Rápida (Auto)", icon="auto_awesome", bgcolor="purple", color="white", height=45, expand=True, on_click=self.run_auto_mode)
-        self.btn_manual = ft.ElevatedButton("🥕 Seleccionar Ingredientes", icon="restaurant_menu", bgcolor="orange", color="white", height=45, expand=True, on_click=self.setup_manual_mode)
+        # Botones Principales
+        self.btn_auto = ft.ElevatedButton("🎲 Sugerencia Auto", icon="auto_awesome", bgcolor="purple", color="white", height=45, expand=True, on_click=self.run_auto_mode)
+        self.btn_manual = ft.ElevatedButton("🥕 Selección Manual", icon="restaurant_menu", bgcolor="orange", color="white", height=45, expand=True, on_click=self.setup_manual_mode)
 
         self.controls = [
             ft.Container(
                 padding=15,
                 content=ft.Column([
-                    ft.Text("Chef AI 👨‍🍳", size=24, weight="bold"),
+                    ft.Row([
+                        ft.Text("Chef AI 👨‍🍳", size=24, weight="bold"),
+                        ft.IconButton(icon="book", icon_color="brown", tooltip="Mis Recetas Guardadas", on_click=self.go_to_favorites)
+                    ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                     
-                    # Panel de Configuración
                     ft.Container(
                         padding=10, border=ft.border.all(1, "grey"), border_radius=10, 
                         content=ft.Column([
-                            ft.Text("Configuración:", weight="bold"), 
                             ft.Row([self.meal_type_selector, self.caloric_goal_selector]),
                             ft.Row([self.vibe_selector]), 
                             ft.Row([self.additional_instructions]),
@@ -118,22 +85,14 @@ class ChefView(ft.Column):
                         ])
                     ),
                     ft.Container(height=10),
-                    
-                    # Botones de Acción
                     ft.Row([self.btn_auto, self.btn_manual]),
                     ft.Divider(),
-                    
-                    # Espacio para selectores manuales
                     self.workspace,
-                    
-                    # Área de Estado y Resultados
                     ft.Column([
                         ft.Row([self.loading_bar], alignment=ft.MainAxisAlignment.CENTER),
                         ft.Row([self.status_text], alignment=ft.MainAxisAlignment.CENTER),
                         ft.Container(height=10),
-                        
-                        ft.Row([ft.Text("Resultado:", weight="bold"), self.copy_btn], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-                        self.recipe_card
+                        self.recipes_column
                     ])
                 ])
             )
@@ -141,7 +100,10 @@ class ChefView(ft.Column):
         
         self.selected_ingredients_names = set()
         self.cached_manual_items = [] 
-        self.last_response_text = "" 
+
+    def go_to_favorites(self, e):
+        if self.page_nav_callback:
+            self.page_nav_callback("favorites")
 
     # --- UTILIDADES ---
     def set_loading(self, is_loading, message=""):
@@ -149,40 +111,75 @@ class ChefView(ft.Column):
         self.status_text.value = message
         self.update()
 
-    def copy_to_clipboard(self, e):
-        if self.last_response_text:
-            self.page.set_clipboard(self.last_response_text)
-            self.page.snack_bar = ft.SnackBar(ft.Text("✅ Receta copiada al portapapeles"))
+    def clean_json_text(self, text):
+        # Limpia los bloques de código markdown si existen
+        pattern = r"```json\s*(.*?)\s*```"
+        match = re.search(pattern, text, re.DOTALL)
+        if match: return match.group(1)
+        return text
+
+    # --- GUARDADO Y COPIADO ---
+    def copy_recipe(self, recipe_data):
+        text = f"🍳 {recipe_data['title']}\n\n📝 Ingredientes:\n" + "\n".join([f"- {i}" for i in recipe_data['ingredients']])
+        text += "\n\n🔥 Instrucciones:\n" + "\n".join([f"{idx+1}. {step}" for idx, step in enumerate(recipe_data['instructions'])])
+        self.page.set_clipboard(text)
+        self.page.snack_bar = ft.SnackBar(ft.Text("✅ Copiado"))
+        self.page.snack_bar.open = True
+        self.page.update()
+
+    def save_recipe_to_db(self, recipe_data):
+        try:
+            supabase_client.table("saved_recipes").insert({
+                "title": recipe_data['title'],
+                "ingredients": "\n".join(recipe_data['ingredients']),
+                "instructions": "\n".join(recipe_data['instructions']),
+                "nutritional_info": recipe_data.get('macros', ''),
+                "tags": f"{self.meal_type_selector.value}, {self.vibe_selector.value}"
+            }).execute()
+            self.page.snack_bar = ft.SnackBar(ft.Text("❤️ Guardada en Recetario"))
+            self.page.snack_bar.open = True
+            self.page.update()
+        except Exception as e:
+            self.page.snack_bar = ft.SnackBar(ft.Text(f"❌ Error: {e}"))
             self.page.snack_bar.open = True
             self.page.update()
 
-    # --- FORMATEADOR INTELIGENTE ---
-    def _format_ingredients_detailed(self, items_list):
-        grouped = {}
-        for item in items_list:
-            cat_name = "Otros"
-            if item.get('categories') and item['categories'].get('name'):
-                cat_name = item['categories']['name']
+    # --- UI TARJETAS ---
+    def render_recipe_cards(self, recipes_list):
+        self.recipes_column.controls.clear()
+        for i, recipe in enumerate(recipes_list):
+            ing_controls = [ft.Text("🛒 Ingredientes:", weight="bold")]
+            for ing in recipe.get('ingredients', []):
+                ing_controls.append(ft.Text(f"• {ing}", size=13))
             
-            if cat_name not in grouped: grouped[cat_name] = []
-            
-            loc_name = ""
-            if item.get('locations') and item['locations'].get('name'):
-                loc_name = item['locations']['name'].lower()
-            
-            detail = f"{item['name']}"
-            if "congel" in loc_name or "freezer" in loc_name:
-                detail += " (CONGELADO/Requiere Descongelar)"
-                
-            grouped[cat_name].append(detail)
-        
-        final_str = ""
-        for category, ingredients in grouped.items():
-            ing_list = ", ".join(ingredients)
-            final_str += f"\n- {category}: {ing_list}."
-        return final_str
+            step_controls = [ft.Text("🔥 Pasos Detallados:", weight="bold")]
+            for idx, step in enumerate(recipe.get('instructions', [])):
+                step_controls.append(ft.Container(
+                    content=ft.Text(f"{idx+1}. {step}", size=13),
+                    padding=ft.padding.only(bottom=5)
+                ))
 
-    # --- PROMPT ---
+            card = ft.Container(
+                bgcolor="white", padding=20, border_radius=15, border=ft.border.all(1, "#E0E0E0"),
+                shadow=ft.BoxShadow(spread_radius=1, blur_radius=5, color="#DDDDDD"),
+                content=ft.Column([
+                    ft.Text(f"{recipe['title']}", size=20, weight="bold", color="black"),
+                    ft.Divider(),
+                    ft.Column(ing_controls, spacing=2),
+                    ft.Container(height=10),
+                    ft.Column(step_controls, spacing=2),
+                    ft.Divider(),
+                    ft.Text(f"📊 {recipe.get('macros', '')}", size=12, italic=True, color="grey"),
+                    ft.Row([
+                        ft.ElevatedButton("Copiar", icon="content_copy", color="blue", bgcolor="#E3F2FD", on_click=lambda _, r=recipe: self.copy_recipe(r), expand=True),
+                        ft.ElevatedButton("Guardar", icon="favorite", color="white", bgcolor="pink", on_click=lambda _, r=recipe: self.save_recipe_to_db(r), expand=True)
+                    ])
+                ])
+            )
+            self.recipes_column.controls.append(card)
+        self.update()
+
+    # --- PROMPT REFORZADO ---
     def build_system_prompt(self):
         meal = self.meal_type_selector.value
         is_fit = self.fit_mode_switch.value
@@ -190,63 +187,40 @@ class ChefView(ft.Column):
         vibe = self.vibe_selector.value
         notes = self.additional_instructions.value 
         
-        base = "Actúa como un Chef experto y Nutricionista."
-        if meal != "Cualquiera": base += f" Cocina: {meal.upper()}."
-        
-        if vibe != "Sin preferencia":
-            if "Experimento" in vibe: base += " MODALIDAD: EXPERIMENTAL/FUSIÓN."
-            elif "Bebidas" in vibe: base += " MODALIDAD: BEBIDAS/JUGOS."
-            elif "Vegano" in vibe: base += " RESTRICCIÓN: 100% VEGANO."
-            elif "Vegetariano" in vibe: base += " RESTRICCIÓN: VEGETARIANO."
-            elif "Picoso" in vibe: base += " PREFERENCIA: PICANTE."
-            else: base += f" ESTILO: {vibe.upper()}."
+        base = "Eres un Chef Ejecutivo experto. TU MISION: Crear recetas EXTREMADAMENTE DETALLADAS."
+        if meal != "Cualquiera": base += f" Tipo: {meal}."
+        if vibe != "Sin preferencia": base += f" Estilo: {vibe}."
+        if is_fit: base += " Modo FIT."
+        if notes: base += f" Nota: {notes}."
 
-        if is_fit: base += " MODALIDAD: FIT/SALUDABLE."
-        
-        if caloric_goal == "Déficit Calórico": base += " OBJETIVO: DÉFICIT (Bajo en cal, alto volumen)."
-        elif caloric_goal == "Superávit Calórico": base += " OBJETIVO: SUPERÁVIT (Alta densidad energética)."
-            
-        if notes: base += f" PETICIÓN USUARIO: {notes}."
-        
-        base += " Dame una respuesta EXTENSA usando Markdown (Negritas, Listas, Títulos)."
-        
-        base += "\n\nINSTRUCCIONES DE INVENTARIO:"
-        base += "\n1. OPCIONALIDAD: La lista que te doy son OPCIONES. Elige solo lo que combine."
-        base += "\n2. CONGELADOS: Si un item es '(CONGELADO)', sugiere descongelado."
-        base += "\n3. CANTIDADES: Te doy nombres. TÚ define las porciones exactas en la receta."
-
-        base += "\n\nOBLIGATORIO: Al final, incluye 'INFORMACIÓN NUTRICIONAL APROXIMADA'."
+        base += "\n\nREGLAS DE FORMATO (CRÍTICO):"
+        base += "1. Responde SOLO con un JSON válido (Lista de objetos)."
+        base += "2. En 'ingredients': Sé preciso con cantidades (ej: '200g de pollo', '1 pizca de sal')."
+        base += "3. En 'instructions': NO seas breve. Explica la técnica, tiempos y señales visuales (ej: 'Cocinar hasta que los bordes estén dorados, aprox 4 min')."
+        base += "\nEstructura JSON: "
+        base += '[{"title": "Nombre Épico", "ingredients": ["100g X", "2 cdas Y"], "instructions": ["Paso 1 detallado...", "Paso 2 con tip..."], "macros": "Info nutricional"}]'
         
         return base
 
-    # --- MODO AUTO ---
+    # --- LOGICA DE DATOS ---
+    def _format_ingredients_detailed(self, items_list):
+        grouped = {}
+        for item in items_list:
+            cat = item.get('categories', {}).get('name', 'Otros') if item.get('categories') else 'Otros'
+            if cat not in grouped: grouped[cat] = []
+            detail = f"{item['name']} ({item['quantity']} {item['unit']})"
+            grouped[cat].append(detail)
+        return str(grouped)
+
     def run_auto_mode(self, e):
-        self.workspace.controls.clear()
-        self.manual_menu_visible = False 
-        self.recipe_card.visible = False
-        self.copy_btn.visible = False
-        try: self.workspace.update()
-        except: pass
-        
-        self.set_loading(True, "🔍 Analizando inventario...")
-        
+        self.set_loading(True, "🔍 Analizando y diseñando...")
         try:
-            res = supabase_client.table("inventory").select("name, quantity, unit, categories(name), locations(name)").eq("is_shopping_list", False).execute()
-            
-            if not res.data:
-                self.set_loading(False, "⚠️ Tu inventario está vacío.")
-                return
+            res = supabase_client.table("inventory").select("name, quantity, unit, categories(name)").eq("is_shopping_list", False).execute()
+            inv_txt = self._format_ingredients_detailed(res.data)
+            sys = self.build_system_prompt()
+            self._call_gemini_safe(f"{sys} Inventario: {inv_txt}. Dame 3 opciones detalladas.")
+        except Exception as ex: self.set_loading(False, f"Error: {ex}")
 
-            inventory_text = self._format_ingredients_detailed(res.data)
-            
-            sys_prompt = self.build_system_prompt()
-            prompt = f"{sys_prompt} Mis opciones son: {inventory_text}. Dame 3 opciones detalladas."
-            self._call_gemini_safe(prompt)
-            
-        except Exception as ex:
-            self.set_loading(False, f"❌ Error: {ex}")
-
-    # --- MODO MANUAL ---
     def setup_manual_mode(self, e):
         if self.manual_menu_visible:
             self.workspace.controls.clear()
@@ -255,7 +229,7 @@ class ChefView(ft.Column):
             return
 
         self.manual_menu_visible = True
-        self.recipe_card.visible = False 
+        self.recipes_column.controls.clear()
         self.set_loading(True, "Cargando ingredientes...")
         self.workspace.controls.clear()
         self.selected_ingredients_names.clear()
@@ -266,12 +240,10 @@ class ChefView(ft.Column):
             self.set_loading(False, "")
 
             if not res.data:
-                self.workspace.controls.append(ft.Text("Sin ingredientes."))
+                self.workspace.controls.append(ft.Text("Sin ingredientes en tu inventario."))
             else:
                 self.cached_manual_items = res.data
-                self.workspace.controls.append(
-                    ft.Container(bgcolor="#FFF3E0", padding=5, border_radius=5, content=self.exclusion_mode_switch)
-                )
+                self.workspace.controls.append(ft.Container(bgcolor="#FFF3E0", padding=5, border_radius=5, content=self.exclusion_mode_switch))
                 self.workspace.controls.append(ft.Text("Selecciona:", weight="bold"))
                 
                 for item in res.data:
@@ -282,8 +254,7 @@ class ChefView(ft.Column):
                 self.workspace.controls.append(ft.ElevatedButton("🍳 Cocinar", bgcolor="green", color="white", on_click=self.run_manual_action))
             self.workspace.update()
             
-        except Exception as ex:
-            self.set_loading(False, f"❌ Error: {ex}")
+        except Exception as ex: self.set_loading(False, f"❌ Error: {ex}")
 
     def toggle_selection(self, e, name):
         if e.control.value: self.selected_ingredients_names.add(name)
@@ -295,7 +266,7 @@ class ChefView(ft.Column):
 
         if is_exclusion:
             if not self.selected_ingredients_names:
-                final_items_data = self.cached_manual_items # Todo
+                final_items_data = self.cached_manual_items
             else:
                 final_items_data = [item for item in self.cached_manual_items if item['name'] not in self.selected_ingredients_names]
         else:
@@ -308,30 +279,46 @@ class ChefView(ft.Column):
             self.set_loading(False, "⚠️ No quedaron ingredientes disponibles.")
             return
 
-        inventory_text = self._format_ingredients_detailed(final_items_data)
-        
-        sys_prompt = self.build_system_prompt()
-        prompt = f"{sys_prompt} Opciones disponibles: {inventory_text}. Sugiere una receta."
-        self._call_gemini_safe(prompt)
+        inv_txt = self._format_ingredients_detailed(final_items_data)
+        sys = self.build_system_prompt()
+        self._call_gemini_safe(f"{sys} Opciones (filtradas): {inv_txt}. Dame 3 opciones detalladas.")
 
+    # --- MÉTODO CON DIAGNÓSTICO PARA VER EN TERMINAL ---
     def _call_gemini_safe(self, prompt):
-        self.set_loading(True, "👨‍🍳 Cocinando idea... (Consultando IA)")
+        print("\n--- 🚀 INICIANDO PETICIÓN A GEMINI ---")
+        print(f"📝 Prompt enviado (extracto): {prompt[:150]}...")
+        
         try:
             if not gemini_service.client:
-                self.set_loading(False, "❌ Error: Falta API Key.")
+                print("❌ ERROR: No se encontró el cliente de Gemini (API Key faltante).")
+                self.set_loading(False, "Falta API Key")
                 return
             
+            # Llamada a la API
+            print("⏳ Esperando respuesta de Google...")
             response = gemini_service.client.models.generate_content(
                 model='gemini-2.5-flash',
                 contents=prompt
             )
             
-            self.last_response_text = response.text
-            self.recipe_card.content.value = response.text 
-            self.recipe_card.visible = True
-            self.copy_btn.visible = True
+            print("--- 📥 RESPUESTA RECIBIDA DE GEMINI ---")
+            print(f"Texto Crudo recibido:\n{response.text}") # ESTO VEREMOS EN TERMINAL
+            print("---------------------------------------")
+
+            # Intento de limpieza
+            clean_text = self.clean_json_text(response.text)
+            print(f"🧹 Texto limpio para JSON: {clean_text[:50]}...")
+
+            # Intento de Parsing
+            recipes_data = json.loads(clean_text)
+            print("✅ JSON Parseado correctamente. Generando tarjetas...")
             
-            self.set_loading(False, "✅ ¡Listo! Aquí tienes tu receta:")
+            self.set_loading(False, "✅ ¡Listo! Elige tu favorita:")
+            self.render_recipe_cards(recipes_data)
             
+        except json.JSONDecodeError as json_err:
+            print(f"❌ ERROR JSON: No se pudo convertir el texto a JSON.\nDetalle: {json_err}")
+            self.set_loading(False, "❌ Error: La IA no devolvió un formato válido.")
         except Exception as ex:
-            self.set_loading(False, f"❌ Error IA: {ex}")
+            print(f"❌ ERROR GENERAL: {ex}")
+            self.set_loading(False, f"❌ Error del sistema: {ex}")

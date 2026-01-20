@@ -11,7 +11,7 @@ class InventoryView(ft.Column):
         self.all_items = [] 
         self.pending_items = []
 
-        # --- SECCIÓN PENDIENTES (SALA DE ESPERA) ---
+        # --- SECCIÓN PENDIENTES ---
         self.pending_section = ft.Container(visible=False)
 
         # --- BARRA DE BÚSQUEDA ---
@@ -25,8 +25,7 @@ class InventoryView(ft.Column):
         self.filter_category = ft.Dropdown(label="Categoría", text_size=12, expand=True, on_change=lambda _: self.run_local_filter())
         self.filter_location = ft.Dropdown(label="Ubicación", text_size=12, expand=True, on_change=lambda _: self.run_local_filter())
 
-        # --- GRID PRINCIPAL (AQUÍ ESTÁ LA CORRECCIÓN) ---
-        # Aplicamos el padding aquí mismo para no romper la referencia
+        # --- GRID PRINCIPAL ---
         self.inventory_grid = ft.GridView(
             expand=True, 
             runs_count=2, 
@@ -34,8 +33,8 @@ class InventoryView(ft.Column):
             child_aspect_ratio=0.75,
             spacing=10, 
             run_spacing=10, 
-            # Padding: Izq, Arr, Der, Abajo (80px para librar el botón flotante)
-            padding=ft.padding.only(left=10, top=10, right=10, bottom=80) 
+            # Padding inferior de 100px para asegurar que el botón no tape el último producto
+            padding=ft.padding.only(left=10, top=10, right=10, bottom=100) 
         )
         
         self.no_results_text = ft.Container(
@@ -46,6 +45,12 @@ class InventoryView(ft.Column):
             alignment=ft.alignment.center, visible=False, padding=20
         )
         
+        # --- BOTÓN FLOTANTE (Definido aquí, no en la página) ---
+        self.fab = ft.FloatingActionButton(
+            icon="add", bgcolor="blue", 
+            on_click=lambda _: self.open_form_for_create()
+        )
+
         # Formulario
         self.name_ref = ft.Ref[ft.TextField]()
         self.qty_ref = ft.Ref[ft.TextField]()
@@ -73,9 +78,7 @@ class InventoryView(ft.Column):
     def did_mount(self):
         if not self.page: return
         self.page.overlay.append(self.date_picker)
-        self.page.floating_action_button = ft.FloatingActionButton(
-            icon="add", bgcolor="blue", on_click=lambda _: self.open_form_for_create()
-        )
+        # NOTA: Eliminamos self.page.floating_action_button para que no salga global
         self.load_catalogs()
         self.load_inventory_data()
         self.page.update()
@@ -95,10 +98,18 @@ class InventoryView(ft.Column):
                 ft.Row([self.filter_location, self.filter_category]),
                 ft.Divider(height=10, color="transparent"),
                 
-                # Stack simple: Grid original + Texto de vacío
+                # --- STACK MÁGICO ---
+                # Aquí está la corrección: Usamos 'right' y 'bottom' en el Container del botón
+                # en lugar de 'alignment'. Esto evita que el contenedor tape los clicks del Grid.
                 ft.Stack([
                     self.inventory_grid, 
-                    self.no_results_text
+                    self.no_results_text,
+                    
+                    ft.Container(
+                        content=self.fab,
+                        right=15,  # Pegado a la derecha (15px)
+                        bottom=15, # Pegado abajo (15px) -> Arriba de la nav bar
+                    )
                 ], expand=True)
 
             ], expand=True) 
@@ -139,18 +150,15 @@ class InventoryView(ft.Column):
         )
 
     def toggle_mode(self, mode):
+        # Simplemente cambiamos la vista. El botón vive en list_view, así que se va y viene solo.
         if mode == "form":
             self.controls = [self.form_view]
-            self.page.floating_action_button = None
         else:
             self.controls = [self.list_view]
             self.load_inventory_data() 
-            self.page.floating_action_button = ft.FloatingActionButton(
-                icon="add", bgcolor="blue", on_click=lambda _: self.open_form_for_create()
-            )
         self.update()
 
-    # --- CARGA DE DATOS ---
+    # --- LÓGICA DE DATOS (Intacta) ---
     def load_inventory_data(self):
         try:
             self.inventory_grid.controls.clear()
@@ -198,7 +206,6 @@ class InventoryView(ft.Column):
                 ft.Divider()
             ])
 
-    # --- FILTRADO LOCAL ---
     def run_local_filter(self):
         filtered = self.all_items 
         
