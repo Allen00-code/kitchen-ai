@@ -1,119 +1,162 @@
 import flet as ft
 from src.services.supabase_service import supabase_client
-from datetime import datetime
+from datetime import datetime, timedelta
 
 class DashboardView(ft.Column):
-    def __init__(self):
+    def __init__(self, on_logout):
         super().__init__()
+        self.on_logout = on_logout
         self.expand = True
         self.scroll = ft.ScrollMode.AUTO
-        
-        self.stats_container = ft.Row(spacing=20, alignment=ft.MainAxisAlignment.CENTER)
-        self.expiring_container = ft.Column(spacing=10)
+
+        # --- HEADER (Saludo + Logout) ---
+        self.header = ft.Container(
+            padding=20,
+            bgcolor="white",
+            border_radius=15,
+            shadow=ft.BoxShadow(blur_radius=5, color="#E0E0E0"),
+            content=ft.Row([
+                ft.Column([
+                    ft.Text("¡Hola Chef! 👋", size=24, weight="bold", color="blue"),
+                    ft.Text("Aquí tienes el resumen de tu cocina", size=14, color="grey")
+                ], expand=True),
+                
+                ft.IconButton(
+                    icon="logout", 
+                    icon_color="red", 
+                    tooltip="Cerrar Sesión",
+                    on_click=lambda _: self.confirm_logout()
+                )
+            ])
+        )
+
+        # --- SECCIONES DE DATOS (Se llenan al cargar) ---
+        self.stats_container = ft.Container()
+        self.expiring_container = ft.Container()
 
         self.controls = [
-            ft.Container(
-                padding=20,
-                content=ft.Column([
-                    ft.Text("Resumen de Cocina", size=24, weight="bold"),
-                    ft.Divider(height=20, color="transparent"),
-                    self.stats_container,
-                    ft.Divider(height=20, color="transparent"),
-                    ft.Text("⚠️ Alertas de Caducidad", size=20, weight="bold"),
-                    self.expiring_container
-                ])
-            )
+            self.header,
+            ft.Container(height=20),
+            self.stats_container,
+            ft.Container(height=20),
+            ft.Text("⚠️ Atención Requerida (Caducan pronto)", weight="bold", size=16),
+            self.expiring_container
         ]
 
     def did_mount(self):
-        self.load_data()
+        # Cargamos los datos cada vez que entramos a la pantalla
+        self.load_dashboard_data()
 
-    def load_data(self):
+    def load_dashboard_data(self):
         try:
-            res_inv = supabase_client.table("inventory").select("*", count="exact").eq("is_shopping_list", False).execute()
-            count_inv = len(res_inv.data)
-            res_shop = supabase_client.table("inventory").select("*", count="exact").eq("is_shopping_list", True).execute()
-            count_shop = len(res_shop.data)
-
-            self.stats_container.controls = [
-                self._build_stat_card("Productos", str(count_inv), "blue", "kitchen"),
-                self._build_stat_card("En Lista", str(count_shop), "orange", "shopping_cart")
-            ]
+            # Traemos TODO el inventario (no shopping list)
+            res = supabase_client.table("inventory").select("*").eq("is_shopping_list", False).execute()
+            items = res.data
             
-            self.expiring_container.controls.clear()
+            # 1. Conteo Total
+            total_items = len(items)
+            
+            # 2. Lógica de Caducidad (Próximos 7 días)
+            expiring_soon = []
             today = datetime.now().date()
-            items_with_date = [i for i in res_inv.data if i.get('expiry_date')]
-            
-            alerts = []
-            for item in items_with_date:
-                try:
-                    exp_date = datetime.strptime(item['expiry_date'], "%Y-%m-%d").date()
-                    delta = (exp_date - today).days
-                    if delta < 0: alerts.append((item, f"Venció hace {abs(delta)} días", "red", "warning"))
-                    elif delta == 0: alerts.append((item, "¡Vence HOY!", "red", "priority_high"))
-                    elif delta <= 3: alerts.append((item, f"Vence en {delta} días", "orange", "access_time"))
-                    elif delta <= 7: alerts.append((item, f"Vence en {delta} días", "yellow", "calendar_today"))
-                except: pass
+            warning_limit = today + timedelta(days=7)
 
-            if not alerts:
-                self.expiring_container.controls.append(ft.Container(bgcolor="white", padding=15, border_radius=10, content=ft.Row([ft.Icon("check_circle", color="green"), ft.Text("Todo fresco.")])))
+            for item in items:
+                expiry_str = item.get('expiry_date')
+                if expiry_str:
+                    try:
+                        exp_date = datetime.strptime(expiry_str, "%Y-%m-%d").date()
+                        # Si ya venció O vence en la próxima semana
+                        if exp_date <= warning_limit:
+                            days_left = (exp_date - today).days
+                            item['days_left'] = days_left
+                            expiring_soon.append(item)
+                    except: pass # Si la fecha está mal formato, la ignoramos
+
+            # Ordenar: Los que vencen primero van arriba
+            expiring_soon.sort(key=lambda x: x['days_left'])
+
+            # --- RENDERIZAR STATS ---
+            self.stats_container.content = ft.Row([
+                self._build_stat_card("Productos", str(total_items), "kitchen", "blue"),
+                self._build_stat_card("Por Caducar", str(len(expiring_soon)), "warning", "orange"),
+            ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
+
+            # --- RENDERIZAR LISTA DE CADUCIDAD ---
+            if not expiring_soon:
+                self.expiring_container.content = ft.Container(
+                    padding=20, bgcolor="white", border_radius=10,
+                    content=ft.Row([
+                        ft.Icon("check_circle", color="green"),
+                        ft.Text("¡Todo fresco! Nada caduca pronto.", color="green")
+                    ], alignment=ft.MainAxisAlignment.CENTER)
+                )
             else:
-                for item, msg, color, icon in alerts:
-                    self._add_alert_card(item, msg, color, icon)
-            
+                expiry_list = ft.Column(spacing=10)
+                for item in expiring_soon:
+                    days = item['days_left']
+                    if days < 0:
+                        msg = f"Venció hace {abs(days)} días"
+                        color = "red"
+                    elif days == 0:
+                        msg = "¡Vence HOY!"
+                        color = "red"
+                    else:
+                        msg = f"Vence en {days} días"
+                        color = "orange"
+
+                    expiry_list.controls.append(
+                        ft.Container(
+                            bgcolor="white", padding=10, border_radius=10, border=ft.border.all(1, "#EEEEEE"),
+                            content=ft.Row([
+                                ft.Icon("warning_amber", color=color),
+                                ft.Column([
+                                    ft.Text(item['name'], weight="bold"),
+                                    ft.Text(f"{item['quantity']} {item['unit']}", size=12, color="grey")
+                                ], expand=True),
+                                ft.Container(
+                                    bgcolor=ft.colors.with_opacity(0.1, color), padding=5, border_radius=5,
+                                    content=ft.Text(msg, color=color, size=12, weight="bold")
+                                )
+                            ])
+                        )
+                    )
+                self.expiring_container.content = expiry_list
+
             self.update()
+
         except Exception as e:
             print(f"Error dashboard: {e}")
 
-    def _add_alert_card(self, item, msg, color, icon):
-        text_color = "black" if color == "yellow" else "white"
-        btn = None
-        if color == "red":
-            btn = ft.ElevatedButton("Gestionar", bgcolor="white", color="red", height=30, on_click=lambda e: self.open_resolve_dialog(item))
-
-        row = [ft.Icon(icon, color=text_color), ft.Text(f"{item['name']}: {msg}", color=text_color, weight="bold", expand=True)]
-        if btn: row.append(btn)
-
-        self.expiring_container.controls.append(
-            ft.Container(bgcolor=color, padding=10, border_radius=8, content=ft.Row(row, alignment=ft.MainAxisAlignment.SPACE_BETWEEN))
+    def _build_stat_card(self, title, value, icon, color):
+        return ft.Container(
+            expand=True,
+            bgcolor="white",
+            padding=20,
+            border_radius=15,
+            shadow=ft.BoxShadow(blur_radius=5, color="#F0F0F0"),
+            content=ft.Column([
+                ft.Icon(icon, color=color, size=30),
+                ft.Text(value, size=24, weight="bold"),
+                ft.Text(title, size=14, color="grey")
+            ])
         )
 
-    def _build_stat_card(self, title, value, color, icon_name):
-        return ft.Container(bgcolor=color, padding=20, border_radius=15, expand=True, content=ft.Column([ft.Icon(icon_name, color="white", size=30), ft.Text(value, size=40, weight="bold", color="white"), ft.Text(title, color="white", size=14)], horizontal_alignment=ft.CrossAxisAlignment.CENTER))
-
-    # --- DIÁLOGO ON-THE-FLY ---
-    def open_resolve_dialog(self, item):
-        self.selected_item = item
-        # Creamos diálogo aquí mismo
-        dialog = ft.AlertDialog(
-            title=ft.Text("⚠️ Producto Vencido"),
-            content=ft.Text(f"¿Qué hacer con {item['name']}?"),
+    def confirm_logout(self):
+        self.dlg = ft.AlertDialog(
+            title=ft.Text("¿Cerrar Sesión?"),
             actions=[
-                ft.TextButton("Cancelar", on_click=lambda e: self.close_dialog(dialog)),
-                ft.TextButton("Tirar 🗑️", on_click=lambda e: self.execute_resolve(to_cart=False, dlg=dialog), style=ft.ButtonStyle(color="red")),
-                ft.ElevatedButton("Comprar 🛒", on_click=lambda e: self.execute_resolve(to_cart=True, dlg=dialog), bgcolor="green", color="white"),
+                ft.TextButton("Cancelar", on_click=lambda e: self.close_dlg()),
+                ft.ElevatedButton("Sí, Salir", bgcolor="red", color="white", on_click=lambda e: self.execute_logout())
             ],
             actions_alignment=ft.MainAxisAlignment.END,
         )
-        self.page.open(dialog)
+        self.page.open(self.dlg)
 
-    def close_dialog(self, dlg):
-        self.page.close(dlg)
+    def close_dlg(self):
+        self.page.close(self.dlg)
 
-    def execute_resolve(self, to_cart, dlg):
-        if not self.selected_item: return
-        try:
-            if to_cart:
-                supabase_client.table("inventory").update({"is_shopping_list": True, "location_id": None, "expiry_date": None}).eq("id", self.selected_item['id']).execute()
-                msg = "Movido al Carrito"
-            else:
-                supabase_client.table("inventory").delete().eq("id", self.selected_item['id']).execute()
-                msg = "Eliminado"
-            self.page.snack_bar = ft.SnackBar(ft.Text(f"✅ {msg}"))
-            self.page.snack_bar.open = True
-        except Exception as e:
-            print(f"Error: {e}")
-        
-        self.page.close(dlg)
-        self.load_data()
-        self.page.update()
+    def execute_logout(self):
+        self.page.close(self.dlg)
+        if self.on_logout:
+            self.on_logout()

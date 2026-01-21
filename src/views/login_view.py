@@ -1,140 +1,82 @@
 import flet as ft
+from src.services.supabase_service import supabase_service
 import time
-import random
 
-class LoginView(ft.Column):
+class LoginView(ft.Container):
     def __init__(self, on_login_success):
         super().__init__()
         self.on_login_success = on_login_success
         self.expand = True
-        self.alignment = ft.MainAxisAlignment.CENTER
-        self.horizontal_alignment = ft.CrossAxisAlignment.CENTER
+        self.alignment = ft.alignment.center
+        self.bgcolor = "#F5F5F5"
         
-        # --- CONFIGURACIÓN DE SEGURIDAD ---
-        self.CORRECT_PASSWORD = "Chef2025"  # <--- TU CONTRASEÑA
-        self.MAX_ATTEMPTS = 5
-        self.LOCKOUT_DURATION = 300  # 300 segundos = 5 minutos
+        # UI Elements
+        self.email_input = ft.TextField(label="Correo Electrónico", width=300, prefix_icon="email")
+        self.pass_input = ft.TextField(label="Contraseña", password=True, can_reveal_password=True, width=300, prefix_icon="lock")
+        self.status_text = ft.Text("", color="red", size=12)
         
-        self.attempts = 0
-        self.lockout_time = None # Momento en que se bloqueó
-        
-        # --- CAPTCHA MATEMÁTICO ---
-        self.num1 = random.randint(1, 10)
-        self.num2 = random.randint(1, 10)
-        self.captcha_answer = self.num1 + self.num2
+        # Botones
+        self.btn_login = ft.ElevatedButton("Iniciar Sesión", on_click=self.handle_login, bgcolor="blue", color="white", width=300)
+        self.btn_signup = ft.OutlinedButton("Crear Cuenta Nueva", on_click=self.handle_signup, width=300)
 
-        # --- UI ---
-        self.logo = ft.Icon(name="lock_outline", size=80, color="blue")
-        self.title = ft.Text("KitchenAI", size=24, weight="bold")
-        self.subtitle = ft.Text("Verificación de Seguridad", color="grey")
-        
-        self.pass_input = ft.TextField(
-            label="Contraseña", password=True, can_reveal_password=True, 
-            text_align="center", width=280
-        )
-        
-        # Campo del Captcha
-        self.captcha_input = ft.TextField(
-            label=f"¿Cuánto es {self.num1} + {self.num2}?", 
-            text_align="center", width=280, 
-            keyboard_type="number",
-            hint_text="Resuelve la suma (Anti-Bots)"
-        )
-        
-        self.login_btn = ft.ElevatedButton(
-            "Entrar", bgcolor="blue", color="white", width=280, height=45,
-            on_click=self.check_login
-        )
-        
-        self.status_text = ft.Text("", color="red", size=12, text_align="center")
+        self.content = ft.Column([
+            # CAMBIO DE ICONO: De 'security' a 'soup_kitchen'
+            ft.Icon("soup_kitchen", size=80, color="orange"), 
+            ft.Text("Kitchen AI", size=30, weight="bold"),
+            ft.Text("Tu asistente de cocina personal", color="grey"),
+            ft.Container(height=20),
+            self.email_input,
+            self.pass_input,
+            ft.Container(height=10),
+            self.btn_login,
+            ft.Container(height=5),
+            ft.Text("¿Primera vez aquí?", size=12),
+            self.btn_signup,
+            ft.Container(height=10),
+            self.status_text
+        ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, alignment=ft.MainAxisAlignment.CENTER)
 
-        self.controls = [
-            ft.Container(
-                content=ft.Column([
-                    self.logo, self.title, self.subtitle,
-                    ft.Divider(height=20, color="transparent"),
-                    self.pass_input,
-                    ft.Container(height=10),
-                    self.captcha_input, # Agregamos el captcha visualmente
-                    ft.Container(height=20),
-                    self.login_btn,
-                    ft.Container(height=10),
-                    self.status_text
-                ], horizontal_alignment=ft.CrossAxisAlignment.CENTER),
-                padding=40, border_radius=20, bgcolor="white",
-                shadow=ft.BoxShadow(blur_radius=10, color="grey")
-            )
-        ]
+    def handle_login(self, e):
+        if not self.email_input.value or not self.pass_input.value:
+            self.status_text.value = "Por favor llena todos los campos"
+            self.update()
+            return
+        
+        self.status_text.value = "Conectando..."
+        self.status_text.color = "blue"
+        self.update()
 
-    def check_login(self, e):
-        # 1. VERIFICAR SI ESTÁ BLOQUEADO TEMPORALMENTE
-        if self.lockout_time:
-            elapsed = time.time() - self.lockout_time
-            if elapsed < self.LOCKOUT_DURATION:
-                remaining = int(self.LOCKOUT_DURATION - elapsed)
-                minutes = remaining // 60
-                seconds = remaining % 60
-                self.status_text.value = f"⏳ Sistema en enfriamiento.\nIntenta en {minutes}m {seconds}s."
-                self.status_text.color = "orange"
-                self.update()
-                return
-            else:
-                # El tiempo pasó, reseteamos todo
-                self.reset_lockout()
+        try:
+            # Intentamos Login en Supabase
+            supabase_service.sign_in(self.email_input.value, self.pass_input.value)
+            
+            self.status_text.value = "✅ ¡Bienvenido!"
+            self.status_text.color = "green"
+            self.update()
+            time.sleep(0.5)
+            self.on_login_success() # Pasamos al Dashboard
+            
+        except Exception as ex:
+            self.status_text.value = f"Error: Credenciales inválidas o error de red."
+            self.status_text.color = "red"
+            print(f"Login Error: {ex}")
+            self.update()
 
-        # 2. VERIFICAR CAPTCHA
-        if self.captcha_input.value != str(self.captcha_answer):
-            self.status_text.value = "🤖 Error en la suma. ¿Eres un robot?"
-            self.regenerate_captcha() # Cambiamos la suma para evitar spam
+    def handle_signup(self, e):
+        if not self.email_input.value or not self.pass_input.value:
+            self.status_text.value = "Ingresa un correo y contraseña para registrarte"
             self.update()
             return
 
-        # 3. VERIFICAR CONTRASEÑA
-        if self.pass_input.value == self.CORRECT_PASSWORD:
-            self.status_text.value = "✅ Acceso Correcto"
-            self.status_text.color = "green"
-            self.pass_input.disabled = True
-            self.captcha_input.disabled = True
-            self.update()
-            time.sleep(0.5)
-            self.on_login_success()
-        else:
-            self.handle_failed_attempt()
-
-    def handle_failed_attempt(self):
-        self.attempts += 1
-        remaining = self.MAX_ATTEMPTS - self.attempts
-        self.regenerate_captcha() # Nueva suma
-        self.pass_input.value = ""
-        
-        if remaining <= 0:
-            self.lockout_time = time.time()
-            self.status_text.value = "⛔ Demasiados intentos.\nBloqueo temporal de 5 minutos."
-            self.status_text.color = "red"
-            self.pass_input.disabled = True
-            self.captcha_input.disabled = True
-            self.login_btn.disabled = True
-            self.logo.name = "timer_off"
-            self.logo.color = "red"
-        else:
-            self.status_text.value = f"❌ Contraseña incorrecta.\nTe quedan {remaining} intentos."
-        
+        self.status_text.value = "Creando cuenta..."
+        self.status_text.color = "orange"
         self.update()
 
-    def reset_lockout(self):
-        self.attempts = 0
-        self.lockout_time = None
-        self.pass_input.disabled = False
-        self.captcha_input.disabled = False
-        self.login_btn.disabled = False
-        self.logo.name = "lock_outline"
-        self.logo.color = "blue"
-        self.status_text.value = ""
-        self.regenerate_captcha()
-
-    def regenerate_captcha(self):
-        self.num1 = random.randint(1, 10)
-        self.num2 = random.randint(1, 10)
-        self.captcha_answer = self.num1 + self.num2
-        self.captcha_input.label = f"¿Cuánto es {self.num1} + {self.num2}?"
-        self.captcha_input.value = ""
+        try:
+            supabase_service.sign_up(self.email_input.value, self.pass_input.value)
+            self.status_text.value = "✅ Cuenta creada. ¡Ahora inicia sesión!"
+            self.status_text.color = "green"
+        except Exception as ex:
+            self.status_text.value = f"Error al registrar: {ex}"
+            self.status_text.color = "red"
+        self.update()

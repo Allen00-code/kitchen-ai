@@ -112,11 +112,28 @@ class ChefView(ft.Column):
         self.update()
 
     def clean_json_text(self, text):
-        # Limpia los bloques de código markdown si existen
         pattern = r"```json\s*(.*?)\s*```"
         match = re.search(pattern, text, re.DOTALL)
         if match: return match.group(1)
         return text
+
+    # --- UI HELPERS PARA NUTRICIÓN (CORREGIDO) ---
+    def _build_macro_badge(self, icon, label, value, color):
+        # CORRECCIÓN: Usamos fondo blanco y borde de color en lugar de opacidad
+        # Esto evita el error de flet.colors
+        return ft.Container(
+            padding=5, 
+            border_radius=8, 
+            bgcolor="white",
+            border=ft.border.all(1, color),
+            content=ft.Row([
+                ft.Text(icon),
+                ft.Column([
+                    ft.Text(label, size=10, color="grey"),
+                    ft.Text(value, size=12, weight="bold", color=color)
+                ], spacing=0)
+            ], spacing=5, alignment=ft.MainAxisAlignment.CENTER)
+        )
 
     # --- GUARDADO Y COPIADO ---
     def copy_recipe(self, recipe_data):
@@ -128,13 +145,32 @@ class ChefView(ft.Column):
         self.page.update()
 
     def save_recipe_to_db(self, recipe_data):
+        user = supabase_client.auth.get_user()
+        user_id = user.user.id if user and user.user else None
+        
+        if not user_id:
+            self.page.snack_bar = ft.SnackBar(ft.Text("❌ Error: Sesión no válida."))
+            self.page.snack_bar.open = True
+            self.page.update()
+            return
+
+        # Procesar macros
+        macros = recipe_data.get('macros', {})
+        nutri_info_str = ""
+        
+        if isinstance(macros, dict):
+            nutri_info_str = f"🔥 {macros.get('calories', 'N/A')} | 💪 Prot: {macros.get('protein', 'N/A')} | 🍚 Carbs: {macros.get('carbs', 'N/A')} | 🥑 Grasas: {macros.get('fats', 'N/A')} | 🍭 Azúcar: {macros.get('sugar', 'N/A')}"
+        else:
+            nutri_info_str = str(macros)
+
         try:
             supabase_client.table("saved_recipes").insert({
                 "title": recipe_data['title'],
                 "ingredients": "\n".join(recipe_data['ingredients']),
                 "instructions": "\n".join(recipe_data['instructions']),
-                "nutritional_info": recipe_data.get('macros', ''),
-                "tags": f"{self.meal_type_selector.value}, {self.vibe_selector.value}"
+                "nutritional_info": nutri_info_str,
+                "tags": f"{self.meal_type_selector.value}, {self.vibe_selector.value}",
+                "user_id": user_id 
             }).execute()
             self.page.snack_bar = ft.SnackBar(ft.Text("❤️ Guardada en Recetario"))
             self.page.snack_bar.open = True
@@ -159,6 +195,21 @@ class ChefView(ft.Column):
                     padding=ft.padding.only(bottom=5)
                 ))
 
+            # --- SECCIÓN DE MACROS VISUAL ---
+            macros_data = recipe.get('macros', {})
+            macros_row = ft.Row(wrap=True, spacing=10)
+            
+            if isinstance(macros_data, dict):
+                macros_row.controls = [
+                    self._build_macro_badge("🔥", "Calorías", macros_data.get("calories", "?"), "orange"),
+                    self._build_macro_badge("💪", "Proteína", macros_data.get("protein", "?"), "blue"),
+                    self._build_macro_badge("🍚", "Carbs", macros_data.get("carbs", "?"), "brown"),
+                    self._build_macro_badge("🥑", "Grasas", macros_data.get("fats", "?"), "#8B8000"), # Hex para Dark Yellow
+                    self._build_macro_badge("🍭", "Azúcar", macros_data.get("sugar", "?"), "pink"),
+                ]
+            else:
+                macros_row.controls = [ft.Text(f"📊 {macros_data}", size=12, italic=True, color="grey")]
+
             card = ft.Container(
                 bgcolor="white", padding=20, border_radius=15, border=ft.border.all(1, "#E0E0E0"),
                 shadow=ft.BoxShadow(spread_radius=1, blur_radius=5, color="#DDDDDD"),
@@ -169,7 +220,9 @@ class ChefView(ft.Column):
                     ft.Container(height=10),
                     ft.Column(step_controls, spacing=2),
                     ft.Divider(),
-                    ft.Text(f"📊 {recipe.get('macros', '')}", size=12, italic=True, color="grey"),
+                    ft.Text("Información Nutricional (Aprox):", weight="bold", size=12),
+                    macros_row, 
+                    ft.Container(height=10),
                     ft.Row([
                         ft.ElevatedButton("Copiar", icon="content_copy", color="blue", bgcolor="#E3F2FD", on_click=lambda _, r=recipe: self.copy_recipe(r), expand=True),
                         ft.ElevatedButton("Guardar", icon="favorite", color="white", bgcolor="pink", on_click=lambda _, r=recipe: self.save_recipe_to_db(r), expand=True)
@@ -179,7 +232,7 @@ class ChefView(ft.Column):
             self.recipes_column.controls.append(card)
         self.update()
 
-    # --- PROMPT REFORZADO ---
+    # --- PROMPT REFORZADO 2.0 ---
     def build_system_prompt(self):
         meal = self.meal_type_selector.value
         is_fit = self.fit_mode_switch.value
@@ -187,7 +240,7 @@ class ChefView(ft.Column):
         vibe = self.vibe_selector.value
         notes = self.additional_instructions.value 
         
-        base = "Eres un Chef Ejecutivo experto. TU MISION: Crear recetas EXTREMADAMENTE DETALLADAS."
+        base = "Eres un Chef Ejecutivo experto y Nutricionista. TU MISION: Crear recetas EXTREMADAMENTE DETALLADAS con un PASO A PASO NUMERADO."
         if meal != "Cualquiera": base += f" Tipo: {meal}."
         if vibe != "Sin preferencia": base += f" Estilo: {vibe}."
         if is_fit: base += " Modo FIT."
@@ -195,10 +248,12 @@ class ChefView(ft.Column):
 
         base += "\n\nREGLAS DE FORMATO (CRÍTICO):"
         base += "1. Responde SOLO con un JSON válido (Lista de objetos)."
-        base += "2. En 'ingredients': Sé preciso con cantidades (ej: '200g de pollo', '1 pizca de sal')."
-        base += "3. En 'instructions': NO seas breve. Explica la técnica, tiempos y señales visuales (ej: 'Cocinar hasta que los bordes estén dorados, aprox 4 min')."
-        base += "\nEstructura JSON: "
-        base += '[{"title": "Nombre Épico", "ingredients": ["100g X", "2 cdas Y"], "instructions": ["Paso 1 detallado...", "Paso 2 con tip..."], "macros": "Info nutricional"}]'
+        base += "2. En 'ingredients': Sé preciso con cantidades."
+        base += "3. En 'instructions': NO seas breve. Explica la técnica."
+        base += "\n4. En 'macros': Devuelve un OBJETO con datos aproximados: calories, protein, carbs, fats, sugar."
+        
+        base += "\nEstructura JSON (Strict): "
+        base += '[{"title": "Nombre", "ingredients": ["..."], "instructions": ["..."], "macros": {"calories": "500 kcal", "protein": "30g", "carbs": "50g", "fats": "20g", "sugar": "5g"}}]'
         
         return base
 
@@ -302,7 +357,7 @@ class ChefView(ft.Column):
             )
             
             print("--- 📥 RESPUESTA RECIBIDA DE GEMINI ---")
-            print(f"Texto Crudo recibido:\n{response.text}") # ESTO VEREMOS EN TERMINAL
+            print(f"Texto Crudo recibido:\n{response.text}") 
             print("---------------------------------------")
 
             # Intento de limpieza

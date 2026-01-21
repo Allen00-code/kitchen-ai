@@ -99,7 +99,7 @@ class InventoryView(ft.Column):
                 ft.Divider(height=10, color="transparent"),
                 
                 # --- STACK MÁGICO ---
-                # Aquí está la corrección: Usamos 'right' y 'bottom' en el Container del botón
+                # Usamos 'right' y 'bottom' en el Container del botón
                 # en lugar de 'alignment'. Esto evita que el contenedor tape los clicks del Grid.
                 ft.Stack([
                     self.inventory_grid, 
@@ -158,12 +158,13 @@ class InventoryView(ft.Column):
             self.load_inventory_data() 
         self.update()
 
-    # --- LÓGICA DE DATOS (Intacta) ---
+    # --- LÓGICA DE DATOS ---
     def load_inventory_data(self):
         try:
             self.inventory_grid.controls.clear()
             self.no_results_text.visible = False
             
+            # NOTA: Supabase aplica RLS automáticamente aquí gracias a auth.uid()
             res = supabase_client.table("inventory").select(
                 "*, categories(name, color), locations(name), packaging_types(name)"
             ).eq("is_shopping_list", False).order("id", desc=True).execute()
@@ -362,6 +363,18 @@ class InventoryView(ft.Column):
             self.name_ref.current.error_text = "Requerido"
             self.update()
             return
+        
+        # --- NUEVO: OBTENER USER_ID ---
+        user = supabase_client.auth.get_user()
+        user_id = user.user.id if user and user.user else None
+        
+        if not user_id:
+            self.page.snack_bar = ft.SnackBar(ft.Text("❌ Error: Sesión no válida. Inicia sesión de nuevo."))
+            self.page.snack_bar.open = True
+            self.page.update()
+            return
+        # -----------------------------
+
         try:
             loc_val, cat_val, pkg_val = self.location_ref.current.value, self.category_ref.current.value, self.packaging_ref.current.value
             loc_id, cat_id, pkg_id = None, None, None
@@ -384,7 +397,8 @@ class InventoryView(ft.Column):
                 "expiry_date": self.date_text.current.value if self.date_text.current.value else None,
                 "is_homemade": self.homemade_switch.value,
                 "is_shopping_list": False,
-                "is_pending_entry": False
+                "is_pending_entry": False,
+                "user_id": user_id # <--- ID ASIGNADO AL PRODUCTO
             }
 
             if self.editing_item_id:

@@ -5,6 +5,7 @@ from src.views.shopping_view import ShoppingView
 from src.views.chef_ui import ChefView
 from src.views.favorites_view import FavoritesView
 from src.views.login_view import LoginView
+from src.services.supabase_service import supabase_service # Importamos el servicio para hacer sign_out
 
 # IMPORTAMOS TU CONFIGURACIÓN
 import src.changelog_config as changelog
@@ -18,17 +19,13 @@ def main(page: ft.Page):
     # Contenedor principal del cuerpo
     body_container = ft.Container(expand=True)
 
-    # --- LÓGICA DEL CHANGELOG (NOVEDADES) ---
+    # --- LÓGICA DEL CHANGELOG ---
     def check_changelog():
-        # 1. Preguntamos al dispositivo: "¿Qué versión viste la última vez?"
         last_seen = page.client_storage.get("last_seen_version")
-        
-        # 2. Si la versión del dispositivo es diferente a la actual...
         if last_seen != changelog.CURRENT_VERSION:
             show_changelog_dialog()
 
     def show_changelog_dialog():
-        # Construimos la lista de puntos visualmente
         points_ui = []
         for point in changelog.CHANGELOG_POINTS:
             points_ui.append(
@@ -38,7 +35,6 @@ def main(page: ft.Page):
                 ], alignment=ft.MainAxisAlignment.START, vertical_alignment=ft.CrossAxisAlignment.START)
             )
 
-        # Creamos el diálogo
         dlg = ft.AlertDialog(
             title=ft.Text(changelog.CHANGELOG_TITLE, weight="bold"),
             content=ft.Container(
@@ -46,36 +42,39 @@ def main(page: ft.Page):
                     [
                         ft.Text(f"Versión: {changelog.CURRENT_VERSION}", italic=True, color="grey"),
                         ft.Divider(),
-                        *points_ui # Desempaquetamos los puntos aquí
+                        *points_ui 
                     ], 
                     scroll=ft.ScrollMode.AUTO,
-                    height=200 # Altura máxima para que no tape todo en móviles pequeños
+                    height=200
                 ),
                 width=300
             ),
             actions=[
-                ft.ElevatedButton(
-                    "¡Genial! 😎", 
-                    on_click=lambda e: close_changelog(dlg),
-                    bgcolor="blue", color="white"
-                )
+                ft.ElevatedButton("¡Genial! 😎", on_click=lambda e: close_changelog(dlg), bgcolor="blue", color="white")
             ],
-            modal=True # Obliga a cerrar el diálogo
+            modal=True
         )
         page.open(dlg)
 
     def close_changelog(dlg):
         page.close(dlg)
-        # 3. Guardamos la "marca" en el dispositivo para que no vuelva a salir
         page.client_storage.set("last_seen_version", changelog.CURRENT_VERSION)
 
+    # --- LÓGICA DE LOGOUT (NUEVO) ---
+    def handle_logout():
+        print("Cerrando sesión...")
+        supabase_service.sign_out() # 1. Mata la sesión en Supabase
+        page.clean()                # 2. Limpia la UI actual
+        page.add(LoginView(on_login_success=start_app)) # 3. Muestra el Login de nuevo
+        page.update()
 
-    # --- NAVEGACIÓN (Igual que antes) ---
+    # --- NAVEGACIÓN ---
     def navigate_to(index):
         body_container.content = None
         
         if index == 0:
-            body_container.content = DashboardView()
+            # Pasamos la función de logout al Dashboard
+            body_container.content = DashboardView(on_logout=handle_logout)
         elif index == 1:
             body_container.content = InventoryView()
         elif index == 2:
@@ -113,12 +112,11 @@ def main(page: ft.Page):
         nav_bar
     ], expand=True, spacing=0)
 
-    # --- INICIO ---
+    # --- INICIO DE LA APP (Post-Login) ---
     def start_app():
         page.clean()
         page.add(app_layout)
         navigate_to(0)
-        # 4. LANZAMOS LA VERIFICACIÓN AL ENTRAR
         check_changelog()
 
     # Iniciar con Pantalla de Login
