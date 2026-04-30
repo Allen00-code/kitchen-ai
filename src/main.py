@@ -4,8 +4,7 @@ from src.views.inventory_view import InventoryView
 from src.views.shopping_view import ShoppingView
 from src.views.chef_ui import ChefView
 from src.views.favorites_view import FavoritesView
-from src.views.login_view import LoginView
-from src.services.supabase_service import supabase_service # Importamos el servicio para hacer sign_out
+from src.views.lock_view import LockView
 
 # IMPORTAMOS TU CONFIGURACIÓN
 import src.changelog_config as changelog
@@ -42,8 +41,8 @@ def main(page: ft.Page):
                     [
                         ft.Text(f"Versión: {changelog.CURRENT_VERSION}", italic=True, color="grey"),
                         ft.Divider(),
-                        *points_ui 
-                    ], 
+                        *points_ui
+                    ],
                     scroll=ft.ScrollMode.AUTO,
                     height=200
                 ),
@@ -60,21 +59,12 @@ def main(page: ft.Page):
         page.close(dlg)
         page.client_storage.set("last_seen_version", changelog.CURRENT_VERSION)
 
-    # --- LÓGICA DE LOGOUT (NUEVO) ---
-    def handle_logout():
-        print("Cerrando sesión...")
-        supabase_service.sign_out() # 1. Mata la sesión en Supabase
-        page.clean()                # 2. Limpia la UI actual
-        page.add(LoginView(on_login_success=start_app)) # 3. Muestra el Login de nuevo
-        page.update()
-
     # --- NAVEGACIÓN ---
     def navigate_to(index):
         body_container.content = None
-        
+
         if index == 0:
-            # Pasamos la función de logout al Dashboard
-            body_container.content = DashboardView(on_logout=handle_logout)
+            body_container.content = DashboardView()
         elif index == 1:
             body_container.content = InventoryView()
         elif index == 2:
@@ -82,7 +72,7 @@ def main(page: ft.Page):
         elif index == 3:
             body_container.content = ChefView(page_nav_callback=change_tab_programmatically)
         elif index == 4:
-             body_container.content = FavoritesView()
+            body_container.content = FavoritesView()
 
         body_container.update()
 
@@ -96,13 +86,13 @@ def main(page: ft.Page):
 
     nav_bar = ft.NavigationBar(
         selected_index=0,
-        label_behavior=ft.NavigationBarLabelBehavior.ALWAYS_SHOW, 
+        label_behavior=ft.NavigationBarLabelBehavior.ALWAYS_SHOW,
         destinations=[
-            ft.NavigationBarDestination(icon="dashboard", label="Inicio"),  
-            ft.NavigationBarDestination(icon="kitchen", label="Stock"),     
-            ft.NavigationBarDestination(icon="shopping_cart", label="Lista"), 
-            ft.NavigationBarDestination(icon="restaurant", label="Chef"),   
-            ft.NavigationBarDestination(icon="menu_book", label="Recetas"), 
+            ft.NavigationBarDestination(icon="dashboard", label="Inicio"),
+            ft.NavigationBarDestination(icon="kitchen", label="Stock"),
+            ft.NavigationBarDestination(icon="shopping_cart", label="Lista"),
+            ft.NavigationBarDestination(icon="restaurant", label="Chef"),
+            ft.NavigationBarDestination(icon="menu_book", label="Recetas"),
         ],
         on_change=lambda e: navigate_to(e.control.selected_index)
     )
@@ -112,15 +102,15 @@ def main(page: ft.Page):
         nav_bar
     ], expand=True, spacing=0)
 
-    # --- INICIO DE LA APP (Post-Login) ---
+    # --- INICIO CON PANTALLA DE BLOQUEO ---
     def start_app():
         page.clean()
         page.add(app_layout)
         navigate_to(0)
         check_changelog()
 
-    # Iniciar con Pantalla de Login
-    page.add(LoginView(on_login_success=start_app))
+    # Mostrar la pantalla de bloqueo al arrancar
+    page.add(LockView(on_unlock_success=start_app))
 
 if __name__ == "__main__":
     ft.app(target=main)

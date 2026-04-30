@@ -60,6 +60,18 @@ class ChefView(ft.Column):
         self.fit_mode_switch = ft.Switch(label="🥗 Modo Fit", value=False)
         self.exclusion_mode_switch = ft.Switch(label="🚫 Modo Exclusión", value=False, active_color="red")
 
+        # --- NUEVOS SWITCHES ---
+        self.switch_weekly_plan = ft.Switch(
+            label="🥊 Modo Dieta Semanal (Batch Cooking 5 días)",
+            value=False,
+            active_color="#E65100",
+        )
+        self.switch_suggest_missing = ft.Switch(
+            label="🛒 Sugerir faltantes económicos si el refri está vacío",
+            value=False,
+            active_color="#2E7D32",
+        )
+
         self.workspace = ft.Column()
 
         # Botones Principales
@@ -81,7 +93,17 @@ class ChefView(ft.Column):
                             ft.Row([self.meal_type_selector, self.caloric_goal_selector]),
                             ft.Row([self.vibe_selector]), 
                             ft.Row([self.additional_instructions]),
-                            ft.Row([self.fit_mode_switch])
+                            ft.Row([self.fit_mode_switch]),
+                            ft.Divider(height=6, color="#E0E0E0"),
+                            ft.Container(
+                                padding=ft.padding.symmetric(horizontal=4, vertical=2),
+                                border_radius=8,
+                                bgcolor="#FFF8E1",
+                                content=ft.Column([
+                                    self.switch_weekly_plan,
+                                    self.switch_suggest_missing,
+                                ], spacing=2)
+                            )
                         ])
                     ),
                     ft.Container(height=10),
@@ -145,42 +167,82 @@ class ChefView(ft.Column):
         self.page.update()
 
     def save_recipe_to_db(self, recipe_data):
-        user = supabase_client.auth.get_user()
-        user_id = user.user.id if user and user.user else None
-        
-        if not user_id:
-            self.page.snack_bar = ft.SnackBar(ft.Text("❌ Error: Sesión no válida."))
-            self.page.snack_bar.open = True
-            self.page.update()
-            return
+        """Guarda la receta en saved_recipes y agrega los faltantes a la lista de compras.
 
-        # Procesar macros
-        macros = recipe_data.get('macros', {})
-        nutri_info_str = ""
-        
-        if isinstance(macros, dict):
-            nutri_info_str = f"🔥 {macros.get('calories', 'N/A')} | 💪 Prot: {macros.get('protein', 'N/A')} | 🍚 Carbs: {macros.get('carbs', 'N/A')} | 🥑 Grasas: {macros.get('fats', 'N/A')} | 🍭 Azúcar: {macros.get('sugar', 'N/A')}"
+        Compatible con ambos schemas:
+          - Clásico: title / ingredients (list[str]) / instructions / macros
+          - Nuevo:   name  / ingredients (list[dict]) / steps       / nutrition
+        """
+        # ── Normalizar campos según el schema que llegó ───────────────────────
+        title = recipe_data.get("title") or recipe_data.get("name", "Sin nombre")
+
+        raw_ingredients = recipe_data.get("ingredients", [])
+        if raw_ingredients and isinstance(raw_ingredients[0], dict):
+            # Schema nuevo: [{"name": ..., "quantity": ..., "unit": ...}]
+            ingredients_str = "\n".join(
+                f"{i.get('name', '?')} — {i.get('quantity', '')} {i.get('unit', '')}".strip(" —")
+                for i in raw_ingredients
+            )
         else:
-            nutri_info_str = str(macros)
+            # Schema clásico: ["Ingrediente 1", ...]
+            ingredients_str = "\n".join(str(i) for i in raw_ingredients)
+
+        raw_steps = recipe_data.get("instructions") or recipe_data.get("steps", [])
+        instructions_str = "\n".join(str(s) for s in raw_steps)
+
+        # ── Información nutricional ───────────────────────────────────────────
+        nutrition = recipe_data.get("nutrition") or recipe_data.get("macros", {})
+        if isinstance(nutrition, dict):
+            nutri_info_str = (
+                f"🔥 {nutrition.get('calories', 'N/A')} | "
+                f"💪 Prot: {nutrition.get('protein', 'N/A')} | "
+                f"🍚 Carbs: {nutrition.get('carbs', 'N/A')} | "
+                f"🥑 Grasas: {nutrition.get('fat') or nutrition.get('fats', 'N/A')} | "
+                f"🍭 Azúcar: {nutrition.get('sugar', 'N/A')}"
+            )
+        else:
+            nutri_info_str = str(nutrition)
 
         try:
+            # ── 1. Guardar receta ─────────────────────────────────────────────
             supabase_client.table("saved_recipes").insert({
-                "title": recipe_data['title'],
-                "ingredients": "\n".join(recipe_data['ingredients']),
-                "instructions": "\n".join(recipe_data['instructions']),
+                "title": title,
+                "ingredients": ingredients_str,
+                "instructions": instructions_str,
                 "nutritional_info": nutri_info_str,
                 "tags": f"{self.meal_type_selector.value}, {self.vibe_selector.value}",
-                "user_id": user_id 
+                "is_weekly_plan": self.switch_weekly_plan.value,
             }).execute()
-            self.page.snack_bar = ft.SnackBar(ft.Text("❤️ Guardada en Recetario"))
-            self.page.snack_bar.open = True
-            self.page.update()
-        except Exception as e:
-            self.page.snack_bar = ft.SnackBar(ft.Text(f"❌ Error: {e}"))
+
+            # ── 2. Insertar faltantes en la lista de compras ──────────────────
+            missing = recipe_data.get("missing_ingredients", []) or []
+            added_to_cart = 0
+            for faltante in missing:
+                try:
+                    supabase_client.table("inventory").insert({
+                        "name": faltante.get("name", "Ingrediente"),
+                        "quantity": faltante.get("quantity", 1),
+                        "unit": faltante.get("unit", "pz"),
+                        "is_shopping_list": True,
+                    }).execute()
+                    added_to_cart += 1
+                except Exception as item_err:
+                    print(f"⚠️ No se pudo agregar '{faltante.get('name')}' a compras: {item_err}")
+
+            # ── 3. Notificación de éxito ──────────────────────────────────────
+            msg = "❤️ Guardada en Recetario"
+            if added_to_cart:
+                msg += f" · 🛒 {added_to_cart} faltante(s) → Lista de compras"
+            self.page.snack_bar = ft.SnackBar(ft.Text(msg))
             self.page.snack_bar.open = True
             self.page.update()
 
-    # --- UI TARJETAS ---
+        except Exception as e:
+            self.page.snack_bar = ft.SnackBar(ft.Text(f"❌ Error al guardar: {e}"))
+            self.page.snack_bar.open = True
+            self.page.update()
+
+    # --- UI TARJETAS (schema clásico: title / ingredients lista / instructions / macros) ---
     def render_recipe_cards(self, recipes_list):
         self.recipes_column.controls.clear()
         for i, recipe in enumerate(recipes_list):
@@ -204,7 +266,7 @@ class ChefView(ft.Column):
                     self._build_macro_badge("🔥", "Calorías", macros_data.get("calories", "?"), "orange"),
                     self._build_macro_badge("💪", "Proteína", macros_data.get("protein", "?"), "blue"),
                     self._build_macro_badge("🍚", "Carbs", macros_data.get("carbs", "?"), "brown"),
-                    self._build_macro_badge("🥑", "Grasas", macros_data.get("fats", "?"), "#8B8000"), # Hex para Dark Yellow
+                    self._build_macro_badge("🥑", "Grasas", macros_data.get("fats", "?"), "#8B8000"),
                     self._build_macro_badge("🍭", "Azúcar", macros_data.get("sugar", "?"), "pink"),
                 ]
             else:
@@ -230,6 +292,92 @@ class ChefView(ft.Column):
                 ])
             )
             self.recipes_column.controls.append(card)
+        self.update()
+
+    # --- BANNER DE INGREDIENTES FALTANTES ---
+    def _build_missing_banner(self, missing_list: list) -> ft.Container:
+        """Devuelve un Container naranja/amarillo con los ingredientes sugeridos."""
+        rows = [ft.Text("⚠️ Ingredientes sugeridos para comprar:", weight="bold", color="#E65100", size=14)]
+        for item in missing_list:
+            name = item.get("name", "?")
+            qty = item.get("quantity", "")
+            unit = item.get("unit", "")
+            label = f"• {name}  —  {qty} {unit}".strip(" —")
+            rows.append(ft.Text(label, size=13, color="#4E342E"))
+        return ft.Container(
+            margin=ft.margin.only(top=10),
+            padding=12,
+            border_radius=10,
+            bgcolor="#FFF3E0",
+            border=ft.border.all(1.5, "#FFB74D"),
+            content=ft.Column(rows, spacing=4),
+        )
+
+    # --- UI TARJETAS (schema nuevo: name / ingredients objetos / steps / nutrition / missing_ingredients) ---
+    def render_new_recipe_card(self, recipe: dict):
+        """Renderiza una sola tarjeta con el schema de generate_recipe()."""
+        self.recipes_column.controls.clear()
+
+        # Ingredientes disponibles
+        ing_controls = [ft.Text("🛒 Ingredientes disponibles:", weight="bold")]
+        for ing in recipe.get("ingredients", []):
+            if isinstance(ing, dict):
+                name = ing.get("name", "?")
+                qty = ing.get("quantity", "")
+                unit = ing.get("unit", "")
+                ing_controls.append(ft.Text(f"• {name}  {qty} {unit}", size=13))
+            else:
+                ing_controls.append(ft.Text(f"• {ing}", size=13))
+
+        # Pasos
+        step_controls = [ft.Text("🔥 Pasos Detallados:", weight="bold")]
+        for idx, step in enumerate(recipe.get("steps", [])):
+            step_controls.append(ft.Container(
+                content=ft.Text(f"{idx + 1}. {step}", size=13),
+                padding=ft.padding.only(bottom=5)
+            ))
+
+        # Nutrición
+        nutrition = recipe.get("nutrition", {})
+        macros_row = ft.Row(wrap=True, spacing=10)
+        if isinstance(nutrition, dict):
+            macros_row.controls = [
+                self._build_macro_badge("🔥", "Calorías", str(nutrition.get("calories", "?")), "orange"),
+                self._build_macro_badge("💪", "Proteína", str(nutrition.get("protein", "?")), "blue"),
+                self._build_macro_badge("🍚", "Carbs", str(nutrition.get("carbs", "?")), "brown"),
+                self._build_macro_badge("🥑", "Grasas", str(nutrition.get("fat", "?")), "#8B8000"),
+            ]
+        else:
+            macros_row.controls = [ft.Text(f"📊 {nutrition}", size=12, italic=True, color="grey")]
+
+        # Banner de faltantes (solo si hay)
+        missing = recipe.get("missing_ingredients", [])
+        extra_controls = [self._build_missing_banner(missing)] if missing else []
+
+        card = ft.Container(
+            bgcolor="white", padding=20, border_radius=15, border=ft.border.all(1, "#E0E0E0"),
+            shadow=ft.BoxShadow(spread_radius=1, blur_radius=5, color="#DDDDDD"),
+            content=ft.Column([
+                ft.Text(recipe.get("name", "Receta"), size=20, weight="bold", color="black"),
+                ft.Divider(),
+                ft.Column(ing_controls, spacing=2),
+                *extra_controls,
+                ft.Container(height=10),
+                ft.Column(step_controls, spacing=2),
+                ft.Divider(),
+                ft.Text("Información Nutricional (Aprox):", weight="bold", size=12),
+                macros_row,
+                ft.Container(height=10),
+                ft.Row([
+                    ft.ElevatedButton(
+                        "Guardar", icon="favorite", color="white", bgcolor="pink",
+                        on_click=lambda _, r=recipe: self.save_recipe_to_db(r),
+                        expand=True
+                    )
+                ])
+            ])
+        )
+        self.recipes_column.controls.append(card)
         self.update()
 
     # --- PROMPT REFORZADO 2.0 ---
@@ -271,10 +419,31 @@ class ChefView(ft.Column):
         self.set_loading(True, "🔍 Analizando y diseñando...")
         try:
             res = supabase_client.table("inventory").select("name, quantity, unit, categories(name)").eq("is_shopping_list", False).execute()
-            inv_txt = self._format_ingredients_detailed(res.data)
-            sys = self.build_system_prompt()
-            self._call_gemini_safe(f"{sys} Inventario: {inv_txt}. Dame 3 opciones detalladas.")
-        except Exception as ex: self.set_loading(False, f"Error: {ex}")
+            inventory_items = res.data or []
+
+            is_weekly = self.switch_weekly_plan.value
+            suggest = self.switch_suggest_missing.value
+
+            if is_weekly or suggest:
+                # Usa la nueva función generate_recipe con system instruction dinámica
+                result = gemini_service.generate_recipe(
+                    inventory_items=inventory_items,
+                    is_weekly_plan=is_weekly,
+                    suggest_missing=suggest,
+                )
+                if "error" in result:
+                    self.set_loading(False, f"❌ Error: {result['error']}")
+                else:
+                    self.set_loading(False, "✅ ¡Plan listo!")
+                    self.render_new_recipe_card(result)
+            else:
+                # Flujo clásico
+                inv_txt = self._format_ingredients_detailed(inventory_items)
+                sys_prompt = self.build_system_prompt()
+                self._call_gemini_safe(f"{sys_prompt} Inventario: {inv_txt}. Dame 3 opciones detalladas.")
+
+        except Exception as ex:
+            self.set_loading(False, f"Error: {ex}")
 
     def setup_manual_mode(self, e):
         if self.manual_menu_visible:
@@ -334,9 +503,26 @@ class ChefView(ft.Column):
             self.set_loading(False, "⚠️ No quedaron ingredientes disponibles.")
             return
 
-        inv_txt = self._format_ingredients_detailed(final_items_data)
-        sys = self.build_system_prompt()
-        self._call_gemini_safe(f"{sys} Opciones (filtradas): {inv_txt}. Dame 3 opciones detalladas.")
+        is_weekly = self.switch_weekly_plan.value
+        suggest = self.switch_suggest_missing.value
+
+        if is_weekly or suggest:
+            # Usa la nueva función generate_recipe con system instruction dinámica
+            self.set_loading(True, "🥊 Generando plan personalizado...")
+            result = gemini_service.generate_recipe(
+                inventory_items=final_items_data,
+                is_weekly_plan=is_weekly,
+                suggest_missing=suggest,
+            )
+            if "error" in result:
+                self.set_loading(False, f"❌ Error: {result['error']}")
+            else:
+                self.set_loading(False, "✅ ¡Plan listo!")
+                self.render_new_recipe_card(result)
+        else:
+            inv_txt = self._format_ingredients_detailed(final_items_data)
+            sys_prompt = self.build_system_prompt()
+            self._call_gemini_safe(f"{sys_prompt} Opciones (filtradas): {inv_txt}. Dame 3 opciones detalladas.")
 
     # --- MÉTODO CON DIAGNÓSTICO PARA VER EN TERMINAL ---
     def _call_gemini_safe(self, prompt):

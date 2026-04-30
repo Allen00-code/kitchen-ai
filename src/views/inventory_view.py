@@ -81,7 +81,7 @@ class InventoryView(ft.Column):
         # NOTA: Eliminamos self.page.floating_action_button para que no salga global
         self.load_catalogs()
         self.load_inventory_data()
-        self.page.update()
+        self.update()
 
     def _build_list(self):
         return ft.Container(
@@ -164,7 +164,6 @@ class InventoryView(ft.Column):
             self.inventory_grid.controls.clear()
             self.no_results_text.visible = False
             
-            # NOTA: Supabase aplica RLS automáticamente aquí gracias a auth.uid()
             res = supabase_client.table("inventory").select(
                 "*, categories(name, color), locations(name), packaging_types(name)"
             ).eq("is_shopping_list", False).order("id", desc=True).execute()
@@ -363,17 +362,6 @@ class InventoryView(ft.Column):
             self.name_ref.current.error_text = "Requerido"
             self.update()
             return
-        
-        # --- NUEVO: OBTENER USER_ID ---
-        user = supabase_client.auth.get_user()
-        user_id = user.user.id if user and user.user else None
-        
-        if not user_id:
-            self.page.snack_bar = ft.SnackBar(ft.Text("❌ Error: Sesión no válida. Inicia sesión de nuevo."))
-            self.page.snack_bar.open = True
-            self.page.update()
-            return
-        # -----------------------------
 
         try:
             loc_val, cat_val, pkg_val = self.location_ref.current.value, self.category_ref.current.value, self.packaging_ref.current.value
@@ -398,7 +386,6 @@ class InventoryView(ft.Column):
                 "is_homemade": self.homemade_switch.value,
                 "is_shopping_list": False,
                 "is_pending_entry": False,
-                "user_id": user_id # <--- ID ASIGNADO AL PRODUCTO
             }
 
             if self.editing_item_id:
@@ -408,9 +395,10 @@ class InventoryView(ft.Column):
                 supabase_client.table("inventory").insert(data).execute()
                 msg = "Creado"
 
-            self.page.snack_bar = ft.SnackBar(ft.Text(msg))
-            self.page.snack_bar.open = True
+            if self.page:
+                self.page.snack_bar = ft.SnackBar(ft.Text(msg))
+                self.page.snack_bar.open = True
             self.toggle_mode("list")
         except Exception as ex:
             print(f"Error save: {ex}")
-            if self.page: self.page.update()
+            self.update()

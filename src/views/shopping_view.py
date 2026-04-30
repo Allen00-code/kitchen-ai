@@ -24,11 +24,12 @@ class ShoppingView(ft.Column):
         )
         
         # --- LISTA ---
-        self.shopping_list = ft.Column(spacing=10, scroll=ft.ScrollMode.AUTO)
+        self.shopping_list = ft.Column(spacing=10, scroll=ft.ScrollMode.AUTO, expand=True)
 
         self.controls = [
             ft.Container(
                 padding=20,
+                expand=True,
                 content=ft.Column([
                     ft.Text("Lista de Compras 🛒", size=24, weight="bold"),
                     ft.Text("Cosas que faltan en la cocina", color="grey"),
@@ -36,7 +37,7 @@ class ShoppingView(ft.Column):
                     ft.Row([self.new_item_name, self.btn_add]),
                     ft.Container(height=20),
                     self.shopping_list
-                ])
+                ], expand=True)
             )
         ]
 
@@ -46,7 +47,6 @@ class ShoppingView(ft.Column):
     def load_items(self):
         self.shopping_list.controls.clear()
         try:
-            # Supabase filtra automáticamente por user_id gracias a RLS
             res = supabase_client.table("inventory").select("*").eq("is_shopping_list", True).order("id", desc=True).execute()
             data = res.data
             
@@ -72,25 +72,13 @@ class ShoppingView(ft.Column):
     def add_item(self, e):
         if not self.new_item_name.value: return
 
-        # --- CORRECCIÓN CRÍTICA: OBTENER USER_ID ---
-        user = supabase_client.auth.get_user()
-        user_id = user.user.id if user and user.user else None
-        
-        if not user_id:
-            self.page.snack_bar = ft.SnackBar(ft.Text("❌ Error de sesión. Reloguea por favor."))
-            self.page.snack_bar.open = True
-            self.page.update()
-            return
-        # -------------------------------------------
-
         try:
             supabase_client.table("inventory").insert({
                 "name": self.new_item_name.value,
-                "quantity": 1, # Default
-                "unit": "pz",  # Default
+                "quantity": 1,
+                "unit": "pz",
                 "is_shopping_list": True,
-                "is_pending_entry": True, # Para que cuando se mueva a inventario, pida confirmar
-                "user_id": user_id # <--- LA LLAVE QUE FALTABA
+                "is_pending_entry": True,
             }).execute()
             
             self.new_item_name.value = ""
@@ -112,7 +100,6 @@ class ShoppingView(ft.Column):
 
     def move_to_inventory(self, item):
         # Al mover al inventario, solo cambiamos el flag.
-        # El user_id YA EXISTE, así que no violamos ninguna regla de RLS al hacer update.
         try:
             supabase_client.table("inventory").update({
                 "is_shopping_list": False,

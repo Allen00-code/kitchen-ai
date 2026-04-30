@@ -3,30 +3,20 @@ from src.services.supabase_service import supabase_client
 from datetime import datetime, timedelta
 
 class DashboardView(ft.Column):
-    def __init__(self, on_logout):
+    def __init__(self):
         super().__init__()
-        self.on_logout = on_logout
         self.expand = True
         self.scroll = ft.ScrollMode.AUTO
 
-        # --- HEADER (Saludo + Logout) ---
+        # --- HEADER (Saludo estático) ---
         self.header = ft.Container(
             padding=20,
             bgcolor="white",
             border_radius=15,
             shadow=ft.BoxShadow(blur_radius=5, color="#E0E0E0"),
-            content=ft.Row([
-                ft.Column([
-                    ft.Text("¡Hola Chef! 👋", size=24, weight="bold", color="blue"),
-                    ft.Text("Aquí tienes el resumen de tu cocina", size=14, color="grey")
-                ], expand=True),
-                
-                ft.IconButton(
-                    icon="logout", 
-                    icon_color="red", 
-                    tooltip="Cerrar Sesión",
-                    on_click=lambda _: self.confirm_logout()
-                )
+            content=ft.Column([
+                ft.Text("¡Hola Chef! 👋", size=24, weight="bold", color="blue"),
+                ft.Text("Aquí tienes el resumen de tu cocina", size=14, color="grey")
             ])
         )
 
@@ -141,22 +131,3 @@ class DashboardView(ft.Column):
                 ft.Text(title, size=14, color="grey")
             ])
         )
-
-    def confirm_logout(self):
-        self.dlg = ft.AlertDialog(
-            title=ft.Text("¿Cerrar Sesión?"),
-            actions=[
-                ft.TextButton("Cancelar", on_click=lambda e: self.close_dlg()),
-                ft.ElevatedButton("Sí, Salir", bgcolor="red", color="white", on_click=lambda e: self.execute_logout())
-            ],
-            actions_alignment=ft.MainAxisAlignment.END,
-        )
-        self.page.open(self.dlg)
-
-    def close_dlg(self):
-        self.page.close(self.dlg)
-
-    def execute_logout(self):
-        self.page.close(self.dlg)
-        if self.on_logout:
-            self.on_logout()
