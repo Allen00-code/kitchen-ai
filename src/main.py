@@ -1,3 +1,4 @@
+import os
 import flet as ft
 from src.views.dashboard import DashboardView
 from src.views.inventory_view import InventoryView
@@ -113,4 +114,5 @@ def main(page: ft.Page):
     page.add(LockView(on_unlock_success=start_app))
 
 if __name__ == "__main__":
-    ft.app(target=main)
+    port = int(os.environ.get("PORT", 8080))
+    ft.app(target=main, view=ft.AppView.WEB_BROWSER, port=port, host="0.0.0.0")

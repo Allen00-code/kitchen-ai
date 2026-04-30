@@ -1,4 +1,5 @@
 flet
+flet-web
 supabase
 google-genai
 python-dotenv
