@@ -12,17 +12,16 @@ LOCKOUT_MINUTES = 10
 
 class LockView(ft.Container):
     def __init__(self, on_unlock_success):
-        super().__init__()
+        # Guardamos el callback ANTES del super() para poder referenciarlo
+        # en los handlers que se pasan como on_submit / on_click
         self.on_unlock_success = on_unlock_success
-        self.expand = True
-        self.alignment = ft.Alignment(0.0, 0.0)
-        self.bgcolor = "#F5F5F5"
 
         # --- Rate Limiter ---
         self.failed_attempts = 0
         self.lockout_until = None
 
-        # --- Elementos de UI ---
+        # --- Elementos de UI (construidos ANTES del super para poder
+        #     incluirlos en el content que se pasa al constructor padre) ---
         self.pass_input = ft.TextField(
             label="Contraseña de acceso",
             password=True,
@@ -41,7 +40,7 @@ class LockView(ft.Container):
             width=300,
         )
 
-        self.content = ft.Column(
+        _content = ft.Column(
             [
                 ft.Icon("soup_kitchen", size=80, color="orange"),
                 ft.Text("Kitchen AI", size=32, weight="bold"),
@@ -55,6 +54,15 @@ class LockView(ft.Container):
             ],
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             alignment=ft.MainAxisAlignment.CENTER,
+        )
+
+        # ✅ FIX FLET 0.84 WEB: todas las props se pasan al padre en __init__
+        # para que el motor Flutter/web las fije correctamente desde el inicio.
+        super().__init__(
+            content=_content,
+            expand=True,
+            bgcolor="#F5F5F5",
+            alignment=ft.Alignment(0.0, 0.0),
         )
 
     def handle_unlock(self, e):

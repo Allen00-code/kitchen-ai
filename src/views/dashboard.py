@@ -4,10 +4,6 @@ from datetime import datetime, timedelta
 
 class DashboardView(ft.Column):
     def __init__(self):
-        super().__init__()
-        self.expand = True
-        self.scroll = ft.ScrollMode.AUTO
-
         # --- HEADER (Saludo estático) ---
         self.header = ft.Container(
             padding=20,
@@ -24,14 +20,20 @@ class DashboardView(ft.Column):
         self.stats_container = ft.Container()
         self.expiring_container = ft.Container()
 
-        self.controls = [
-            self.header,
-            ft.Container(height=20),
-            self.stats_container,
-            ft.Container(height=20),
-            ft.Text("⚠️ Atención Requerida (Caducan pronto)", weight="bold", size=16),
-            self.expiring_container
-        ]
+        # ✅ FIX FLET 0.84 WEB: controls, expand y scroll se pasan al padre
+        # en __init__ para que el motor Flutter/web los fije desde el inicio.
+        super().__init__(
+            controls=[
+                self.header,
+                ft.Container(height=20),
+                self.stats_container,
+                ft.Container(height=20),
+                ft.Text("⚠️ Atención Requerida (Caducan pronto)", weight="bold", size=16),
+                self.expiring_container
+            ],
+            expand=True,
+            scroll=ft.ScrollMode.AUTO,
+        )
 
     def did_mount(self):
         # Cargamos los datos cada vez que entramos a la pantalla
@@ -42,10 +44,10 @@ class DashboardView(ft.Column):
             # Traemos TODO el inventario (no shopping list)
             res = supabase_client.table("inventory").select("*").eq("is_shopping_list", False).execute()
             items = res.data
-            
+
             # 1. Conteo Total
             total_items = len(items)
-            
+
             # 2. Lógica de Caducidad (Próximos 7 días)
             expiring_soon = []
             today = datetime.now().date()

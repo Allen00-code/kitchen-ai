@@ -15,8 +15,12 @@ def main(page: ft.Page):
     page.theme_mode = ft.ThemeMode.LIGHT
     page.padding = 0
     page.bgcolor = "#F5F5F5"
+    # ✅ FIX FLET 0.84 WEB: sin estos dos ajustes, el Column raíz no se
+    # estira al 100% del viewport del navegador y produce pantalla gris.
+    page.vertical_alignment = ft.MainAxisAlignment.START
+    page.horizontal_alignment = ft.CrossAxisAlignment.STRETCH
 
-    # Contenedor principal del cuerpo
+    # Contenedor principal del cuerpo (expand=True para ocupar todo el espacio)
     body_container = ft.Container(expand=True)
 
     # --- LÓGICA DEL CHANGELOG ---
