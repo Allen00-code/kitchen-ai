@@ -21,7 +21,9 @@ def main(page: ft.Page):
 
     # --- LÓGICA DEL CHANGELOG ---
     def check_changelog():
-        last_seen = page.client_storage.get("last_seen_version")
+        # Flet 0.84 eliminó 'client_storage' sincrónico. 
+        # Usamos 'session' que es seguro, vive en memoria y no crashea en web.
+        last_seen = page.session.get("last_seen_version")
         if last_seen != changelog.CURRENT_VERSION:
             show_changelog_dialog()
 
@@ -58,7 +60,7 @@ def main(page: ft.Page):
 
     def close_changelog(dlg):
         page.close(dlg)
-        page.client_storage.set("last_seen_version", changelog.CURRENT_VERSION)
+        page.session.set("last_seen_version", changelog.CURRENT_VERSION)
 
     # --- NAVEGACIÓN ---
     def navigate_to(index):
