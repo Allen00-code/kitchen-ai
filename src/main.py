@@ -164,5 +164,5 @@ if __name__ == "__main__":
         view=ft.AppView.WEB_BROWSER,
         port=port,
         host="0.0.0.0",
-        web_renderer=ft.WebRenderer.HTML  # <--- ESTO ES CRUCIAL
+        web_renderer="html"  # <--- ESTO ES CRUCIAL
     )
