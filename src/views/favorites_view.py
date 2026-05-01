@@ -166,7 +166,7 @@ class FavoritesView(ft.Column):
                 ],
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             ),
-            alignment=ft.alignment.center,
+            alignment=ft.Alignment(0.0, 0.0),
             padding=40,
         )
 

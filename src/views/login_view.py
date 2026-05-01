@@ -7,7 +7,7 @@ class LoginView(ft.Container):
         super().__init__()
         self.on_login_success = on_login_success
         self.expand = True
-        self.alignment = ft.alignment.center
+        self.alignment = ft.Alignment(0.0, 0.0)
         self.bgcolor = "#F5F5F5"
         
         # UI Elements

@@ -42,7 +42,7 @@ class InventoryView(ft.Column):
                 ft.Icon("search_off", size=40, color="grey"),
                 ft.Text("No encontramos ese producto 🤷‍♂️", color="grey")
             ], horizontal_alignment=ft.CrossAxisAlignment.CENTER),
-            alignment=ft.alignment.center, visible=False, padding=20
+            alignment=ft.Alignment(0.0, 0.0), visible=False, padding=20
         )
         
         # --- BOTÓN FLOTANTE (Definido aquí, no en la página) ---
@@ -81,7 +81,9 @@ class InventoryView(ft.Column):
         # NOTA: Eliminamos self.page.floating_action_button para que no salga global
         self.load_catalogs()
         self.load_inventory_data()
-        self.update()
+        # No llamar self.update() aquí: load_catalogs() y load_inventory_data()
+        # ya llaman a update() internamente. Llamarlo aquí causa un AssertionError
+        # de "Control must be added to the page first" durante el ciclo de montaje.
 
     def _build_list(self):
         return ft.Container(

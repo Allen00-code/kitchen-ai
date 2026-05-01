@@ -57,7 +57,7 @@ class ShoppingView(ft.Column):
                             ft.Icon("check_circle_outline", size=50, color="green"),
                             ft.Text("¡Todo listo! No hace falta nada.", color="grey")
                         ], horizontal_alignment=ft.CrossAxisAlignment.CENTER),
-                        alignment=ft.alignment.center,
+                        alignment=ft.Alignment(0.0, 0.0),
                         padding=40
                     )
                 )
