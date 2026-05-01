@@ -159,10 +159,8 @@ def main(page: ft.Page):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
-    ft.app(
+    ft.run(
         target=main,
-        view=ft.AppView.WEB_BROWSER,
         port=port,
-        host="0.0.0.0",
-        web_renderer="html"  # <--- ESTO ES CRUCIAL
+        host="0.0.0.0"
     )
