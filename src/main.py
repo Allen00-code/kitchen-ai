@@ -10,6 +10,7 @@ from src.views.favorites_view import FavoritesView
 import src.changelog_config as changelog
 
 def main(page: ft.Page):
+    print(">>> [DEBUG] Iniciando función main...")
     page.title = "Kitchen AI"
     page.theme_mode = ft.ThemeMode.LIGHT
     page.padding = 0
@@ -152,8 +153,16 @@ def main(page: ft.Page):
         alignment=ft.MainAxisAlignment.CENTER,
     )
 
+    print(">>> [DEBUG] Intentando renderizar la pantalla inicial...")
     page.add(login_view)
+    page.update()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
-    ft.app(target=main, view=ft.AppView.WEB_BROWSER, port=port, host="0.0.0.0")
+    ft.app(
+        target=main,
+        view=ft.AppView.WEB_BROWSER,
+        port=port,
+        host="0.0.0.0",
+        web_renderer=ft.WebRenderer.HTML  # <--- ESTO ES CRUCIAL
+    )
