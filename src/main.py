@@ -5,7 +5,6 @@ from src.views.inventory_view import InventoryView
 from src.views.shopping_view import ShoppingView
 from src.views.chef_ui import ChefView
 from src.views.favorites_view import FavoritesView
-from src.views.lock_view import LockView
 
 # IMPORTAMOS TU CONFIGURACIÓN
 import src.changelog_config as changelog
@@ -109,15 +108,51 @@ def main(page: ft.Page):
         nav_bar
     ], expand=True, spacing=0)
 
-    # --- INICIO CON PANTALLA DE BLOQUEO ---
-    def start_app():
-        page.clean()
-        page.add(app_layout)
-        navigate_to(0)
-        check_changelog()
+    # --- PANTALLA DE BLOQUEO NATIVA ---
+    # Centramos la página temporalmente para el login
+    page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
+    page.vertical_alignment = ft.MainAxisAlignment.CENTER
 
-    # Mostrar la pantalla de bloqueo al arrancar
-    page.add(LockView(on_unlock_success=start_app))
+    def try_login(e):
+        if pass_input.value == os.getenv("APP_PASSWORD", ""):
+            # Limpiamos la pantalla y restauramos la alineación para la app
+            page.clean()
+            page.horizontal_alignment = ft.CrossAxisAlignment.START
+            page.vertical_alignment = ft.MainAxisAlignment.START
+            page.bgcolor = "white"
+            page.add(app_layout)
+            navigate_to(0)
+            check_changelog()
+        else:
+            error_text.value = "Contraseña incorrecta"
+            pass_input.value = ""
+            page.update()
+
+    pass_input = ft.TextField(
+        label="Contraseña de acceso",
+        password=True,
+        can_reveal_password=True,
+        width=300,
+        prefix_icon="lock",
+        on_submit=try_login
+    )
+    error_text = ft.Text("", color="red")
+
+    login_view = ft.Column(
+        [
+            ft.Icon("soup_kitchen", size=80, color="orange"),
+            ft.Text("Kitchen AI", size=32, weight="bold"),
+            ft.Text("Acceso Privado", color="grey"),
+            ft.Container(height=20),
+            pass_input,
+            ft.ElevatedButton("Entrar", on_click=try_login, bgcolor="orange", color="white", width=300),
+            error_text
+        ],
+        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+        alignment=ft.MainAxisAlignment.CENTER,
+    )
+
+    page.add(login_view)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
